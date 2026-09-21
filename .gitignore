@@ -1,0 +1,19 @@
+# Sanal ortam (kesinlikle yüklenmemeli)
+.venv/
+venv/
+ENV/
+
+# Python önbellek dosyaları
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Gizli anahtarlar ve ortam değişkenleri
+.env
+
+# SQLite veritabanı (yerel kalsın)
+*.db
+*.sqlite3
+
+# İşletim sistemi kalıntıları
+.DS_Store

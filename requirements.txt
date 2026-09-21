@@ -1,0 +1,4 @@
+crewai
+arize-phoenix
+streamlit
+openinference-instrumentation-crewai
