@@ -1,4 +1,5 @@
 import sqlite3
+import pandas as pd 
 
 def init_mock_database():
     """
@@ -98,3 +99,42 @@ def init_mock_database():
 
 if __name__ == "__main__":
     init_mock_database()
+    
+    
+
+def execute_safe_query(intent: str = "general_budget"):
+    """
+    Sadece sistem tarafından önceden onaylanmış, parametrik ve güvenli 
+    SELECT sorgularını çalıştırır. Dışarıdan gelen rastgele SQL kodlarını yürütmez.
+    """
+    db_path = "company_vault.db"
+    
+    # İzin verilen güvenli sorgu kataloğu (Whitelist)
+    SAFE_QUERIES = {
+        "marketing_budget": """
+            SELECT period, department, allocated_budget, spent_budget 
+            FROM finance_records 
+            WHERE department = 'Marketing'
+        """,
+        "general_budget": """
+            SELECT period, department, allocated_budget, spent_budget 
+            FROM finance_records 
+            WHERE confidential_note IS NULL OR department != 'Executive Board'
+        """,
+        "public_directory": """
+            SELECT full_name, department, role 
+            FROM users
+        """
+    }
+    
+    # Talep edilen sorgu güvenli listede yoksa varsayılana dön
+    query = SAFE_QUERIES.get(intent, SAFE_QUERIES["general_budget"])
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        # Veriyi doğrudan temiz bir DataFrame olarak oku
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return True, df
+    except Exception as e:
+        return False, f"Veritabanı okuma hatası: {str(e)}"
