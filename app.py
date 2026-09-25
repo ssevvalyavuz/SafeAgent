@@ -1,8 +1,9 @@
 import json
 import sqlite3
 import streamlit as st
-from agent import run_security_crew
+from agent import run_security_crew, GatewayDecision
 from database import execute_safe_query
+
 
 #Streamlit sayfa yapılandırması
 st.set_page_config(page_title="CrewAI Güvenlik Kontrolü", page_icon="🛡️", layout="centered")
@@ -42,28 +43,27 @@ with col1:
 
 if submit_btn and user_prompt.strip(): #Kullanıcı butona bastı mı, metin kutusuna gerçekten bir şey yazdı mı?
     with st.spinner("CrewAI güvenlik denetimi ve yönlendirme yapılıyor..."):
-        raw_output = run_security_crew(user_prompt) #Arka planda agent.py'deki run_security_crew fonksiyonu çalışıyor ve üç agent sırayla devreye giriyor.
+        # CrewAI ekibini çalıştırıyoruz
+        result = run_security_crew(user_prompt)
         
-        # JSON temizleme ve ayrıştırma
-        clean_json_str = str(raw_output).replace("```json", "").replace("```", "").strip()
-       
-       
-       #Yapay zeka modelleri bazen beklenmedik formatta çıktı üretebilir. böyle bir durumda json.loads() patlar ve program 
-       #try blogunu terk edip except kısmına duser.
-       
-        parse_error = None
+        # Pydantic çıktısını alıyoruz
         try:
-            decision_data = json.loads(clean_json_str) #düz yazı halindeki JSON'u Python sözlüğüne çeviriyoruz.
-            durum = decision_data.get("durum", "REDDEDİLDİ") #Eğer sözlükte durum anahtarı yoksa varsayılan olarak REDDEDİLDİ kabul ediyoruz.(Zero-Trust ilkesi)
-            target_intent = decision_data.get("intent", "none")
-            gerekce = decision_data.get("gerekce", "")
+            if hasattr(result, "pydantic") and result.pydantic:
+                decision: GatewayDecision = result.pydantic
+            else:
+                decision = result
+            
+            # İngilizce gelen status değerini arayüz için Türkçeye çeviriyoruz
+            durum = "ONAYLANDI" if decision.status == "APPROVED" else "REDDEDİLDİ"
+            target_intent = decision.intent
+            gerekce = decision.reason
+            raw_output = str(decision.model_dump())
         except Exception as e:
-            parse_error = str(e)
-            # Beklenmedik format veya bozuk JSON durumunda güvenli kilit (Fail-Safe)
-            # Niyetten ve onaydan emin olamadığımız için varsayımda bulunmuyoruz, işlemi durduruyoruz.
             durum = "REDDEDİLDİ"
             target_intent = "none"
-            gerekce = "Sistem Hatası: Ajan yanıtı geçerli bir formatta ayrıştırılamadı. Güvenlik gereği veritabanı erişimi engellendi."
+            gerekce = f"Şema Doğrulama Hatası: {str(e)}"
+            raw_output = str(result)        
+            
         st.subheader("🔍 Güvenlik Denetim Raporu")
         st.markdown(f"**DURUM:** {durum}")
         st.markdown(f"**SEÇİLEN INTENT:** `{target_intent}`")
@@ -73,18 +73,15 @@ if submit_btn and user_prompt.strip(): #Kullanıcı butona bastı mı, metin kut
         with st.expander(" Model Çıktısını ve Debug Bilgilerini İncele"):
             st.markdown("**1. CrewAI Ham Çıktısı (`raw_output`):**")
             st.code(str(raw_output), language="text")
-            
-            st.markdown("**2. Temizlenmiş Metin (`clean_json_str`):**")
-            st.code(clean_json_str, language="json")
-            
-            if parse_error:
-                st.error(f"Ayrıştırma (JSON Parse) Hatası: {parse_error}")
-        
+                    
         st.divider()
         st.subheader("📊 Güvenli Sorgu Sonuçları")
         
-        if durum == "ONAYLANDI" and target_intent != "none":
-            success, query_result = execute_safe_query(target_intent)
+        durum_temiz = durum.replace("İ", "I").upper()
+        is_approved = "ONAY" in durum_temiz and "RED" not in durum_temiz
+
+        if is_approved and target_intent != "none":
+            success, query_result = execute_safe_query(target_intent) #Sorgu başarıyla çalıştı mı (success: True/False) ve veritabanından dönen tablo verisi nedir (query_result) sorularının sonucunu alır; böylece Streamlit arayüzünde kullanıcıya yeşil kutu ve tablo olarak gösterilir.
             if success and query_result is not None:
                 st.dataframe(query_result)
             else:
